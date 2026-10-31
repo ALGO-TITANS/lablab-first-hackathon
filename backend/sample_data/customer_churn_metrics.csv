@@ -1,0 +1,21 @@
+customer_id,gender,tenure_months,contract_type,paperless_billing,payment_method,monthly_charges,total_charges,support_tickets,churn_status
+CUST-201,Female,12,Month-to-month,Yes,Electronic check,70.35,844.20,3,Yes
+CUST-202,Male,34,One year,No,Mailed check,56.95,1889.50,1,No
+CUST-203,Male,2,Month-to-month,Yes,Mailed check,53.85,108.15,4,Yes
+CUST-204,Male,45,One year,No,Bank transfer (automatic),42.30,1840.75,0,No
+CUST-205,Female,2,Month-to-month,Yes,Electronic check,70.70,151.65,5,Yes
+CUST-206,Female,8,Month-to-month,Yes,Electronic check,99.65,820.50,2,Yes
+CUST-207,Male,22,Month-to-month,Yes,Credit card (automatic),89.10,1949.40,1,No
+CUST-208,Female,10,Month-to-month,No,Mailed check,29.75,301.90,0,No
+CUST-209,Female,28,One year,Yes,Electronic check,104.80,3046.05,2,Yes
+CUST-210,Male,62,Two year,No,Bank transfer (automatic),56.15,3487.95,0,No
+CUST-211,Male,13,Month-to-month,Yes,Electronic check,18.95,326.80,1,No
+CUST-212,Male,16,Two year,No,Credit card (automatic),18.95,326.80,0,No
+CUST-213,Male,58,Two year,No,Credit card (automatic),24.40,1411.20,0,No
+CUST-214,Male,49,One year,No,Bank transfer (automatic),103.70,5036.30,1,No
+CUST-215,Female,25,Month-to-month,Yes,Electronic check,105.50,2686.05,3,No
+CUST-216,Male,69,Two year,No,Credit card (automatic),113.25,7895.15,0,No
+CUST-217,Female,71,Two year,No,Bank transfer (automatic),106.70,7382.25,1,No
+CUST-218,Female,63,Two year,No,Bank transfer (automatic),65.55,4202.80,0,No
+CUST-219,Male,1,Month-to-month,Yes,Electronic check,55.20,55.20,4,Yes
+CUST-220,Female,1,Month-to-month,Yes,Electronic check,69.95,69.95,3,Yes
