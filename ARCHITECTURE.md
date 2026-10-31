@@ -72,3 +72,52 @@ When an execution fails (e.g., casing mismatch, type error, date parsing error):
 3. Generates a corrected script, re-runs AST validation, and executes attempt #2.
 4. Budget: Maximum 2 automatic repair attempts.
 5. Populates the complete end-to-end execution timeline in the UI.
+
+---
+
+## 3. Cloud Deployment & Storage Architecture
+
+### A. Frontend Edge Architecture (Vercel)
+- The Next.js frontend builds as a static/edge-rendered application communicating with the backend over HTTPS REST.
+- `NEXT_PUBLIC_API_URL` configures the backend endpoint.
+- **Security Boundary:** All `NEXT_PUBLIC_*` variables are embedded into client-side JS bundles. Zero secrets (API keys, database credentials) are exposed to or handled by the frontend.
+
+### B. Backend Deployment & Persistent Disk Strategy (Render)
+- The FastAPI application runs as a stateless Python web service behind an ASGI server (`uvicorn`).
+- **Storage Subsystem:**
+  - `DATA_DIR` (default: `./data`, configurable via env) controls where dataset files and SQLite metadata reside.
+  - On cloud container platforms like Render, the local disk is **ephemeral** by default. Re-deployments and idle tier sleep cycles reset the filesystem.
+  - **Single-Node Persistence:** Mount a Render Persistent Disk (e.g., at `/var/data`) and set `DATA_DIR=/var/data`. The application automatically points `uploads/` and `metadata.db` to the mounted volume.
+  - **Horizontal Multi-Instance Scaling:** In enterprise production clusters, datasets are streamed to S3-compatible object storage (AWS S3 / Google Cloud Storage) with signed URLs, and metadata is managed via a distributed relational database (PostgreSQL / Supabase).
+
+---
+
+## 4. Security Audit & Sandbox Isolation Evaluation
+
+### Current Protection Layers:
+1. **AST Validation:**
+   - Static analysis intercepts dangerous Python syntax prior to bytecode compilation or execution.
+   - Denies OS manipulation, process invocation, network sockets, reflection (`getattr`, `eval`), and dunder traversal.
+2. **Subprocess Credential Sanitization:**
+   - Worker scripts execute in a separate process space with an empty environment dictionary (`env={}`).
+   - Host environment variables, API keys (`GEMINI_API_KEY`, `OPENAI_API_KEY`), and host file descriptors are inaccessible.
+3. **Execution Guardrails:**
+   - Hard timeout enforcement (`SANDBOX_TIMEOUT_SECONDS = 8.0s`) halts CPU runaway loops.
+   - Output truncation limits memory consumption from excessive printing (`SANDBOX_MAX_OUTPUT_CHARS = 200000`).
+
+### Multi-Tenant Production Security Assessment:
+> **Important Security Finding:**
+> Python AST parsing and child subprocesses provide strong defense-in-depth for single-tenant, internal tooling, or hackathon review environments. However, they **do not constitute a true multi-tenant virtualization boundary**.
+>
+> In an adversarial public multi-tenant SaaS environment, determined attackers could theoretically leverage kernel vulnerabilities, cgroup exhaustion, or shared hardware memory attacks to cause denial of service.
+
+### Recommended Multi-Tenant Isolation Architecture:
+For public untrusted multi-user deployment:
+1. **MicroVM Sandboxes (Gold Standard):**
+   - Run each code execution in a dedicated ephemeral MicroVM utilizing **AWS Firecracker** (e.g. Fly.io Machines or Modal).
+   - Startup latency: < 150ms with complete kernel-level hardware virtualization.
+2. **Kernel-Isolated Container Sandboxes:**
+   - Deploy execution workers in **gVisor (`runsc`)** or **Kata Containers**.
+   - Intercepts system calls at the application kernel layer without granting raw host kernel access.
+3. **Dedicated Cloud Sandbox APIs:**
+   - Integrate managed execution runtimes such as **E2B Sandboxes** or **Daytona**, which specialize in isolated code execution for autonomous AI agents.

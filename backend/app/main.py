@@ -10,7 +10,8 @@ from app.api.settings import router as settings_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize SQLite database
+    # Ensure directories and initialize SQLite database
+    settings.ensure_directories()
     init_db()
     yield
 
@@ -21,10 +22,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
+# CORS (configured via CORS_ORIGINS; wildcard '*' strictly removed for deployment security)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS + ["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,6 +43,8 @@ def health_check():
         "status": "healthy",
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
+        "environment": settings.ENVIRONMENT,
+        "debug": settings.DEBUG,
         "default_provider": settings.DEFAULT_LLM_PROVIDER,
         "sandbox_timeout_seconds": settings.SANDBOX_TIMEOUT_SECONDS
     }

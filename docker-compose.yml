@@ -12,6 +12,8 @@ services:
     mem_limit: 1024m
     cpus: 1.5
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       - DEFAULT_LLM_PROVIDER=mock
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}

@@ -5,7 +5,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Next.js-15+-black?logo=next.js&logoColor=white)](https://nextjs.org)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/Pytest-19%2F19%20Passing-brightgreen?logo=pytest)](https://pytest.org)
+[![Tests](https://img.shields.io/badge/Pytest-33%2F33%20Passing-brightgreen?logo=pytest)](https://pytest.org)
 [![Security](https://img.shields.io/badge/Sandbox-AST%20Validated-blue)](#security--sandbox-model)
 
 ---
@@ -89,20 +89,89 @@ docker compose up --build
 
 ---
 
+## 🌐 Production Cloud Deployment Guide
+
+Safe CSV Analyst is architected for seamless separation between static frontend edge hosting (e.g. **Vercel**) and Python ASGI backend execution (e.g. **Render**).
+
+### 1. Backend Deployment (Render)
+
+1. **Create a New Web Service** on [Render](https://render.com) connected to this repository (`ALGO-TITANS/lablab-first-hackathon`).
+2. Configure settings:
+   - **Root Directory:** `backend`
+   - **Environment:** `Python 3`
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+3. Configure Environment Variables in Render:
+   | Key | Recommended Value | Note |
+   |-----|-------------------|------|
+   | `ENVIRONMENT` | `production` | Automatically disables debug endpoints |
+   | `DEBUG` | `False` | Disables debug mode |
+   | `CORS_ORIGINS` | `https://your-frontend.vercel.app` | Comma-separated list of allowed origins (no `*`) |
+   | `DEFAULT_LLM_PROVIDER` | `mock` (or `gemini` / `openai`) | Set API keys if using `gemini` or `openai` |
+   | `GEMINI_API_KEY` | *(optional)* | Your Google Gemini API Key |
+   | `OPENAI_API_KEY` | *(optional)* | Your OpenAI / Groq API Key |
+
+#### ⚠️ Render Persistent Storage & Ephemeral Filesystem
+Render web services run on an **ephemeral disk**. On free or standard restartable instances, uploaded CSV files in `data/uploads` and the SQLite database (`metadata.db`) are wiped whenever the service restarts, deploys, or sleeps.
+- **For Permanent Data on Render:** Add a **Persistent Disk** in the service settings:
+  - **Mount Path:** `/var/data`
+  - **Environment Variable:** `DATA_DIR=/var/data`
+  - The backend dynamically places all uploads (`/var/data/uploads`) and SQLite records (`/var/data/metadata.db`) on this persistent volume.
+- **Enterprise Multi-Instance Note:** For horizontal auto-scaling across multiple containers, replace SQLite with a managed PostgreSQL instance and store uploaded datasets in AWS S3 or Google Cloud Storage.
+
+---
+
+### 2. Frontend Deployment (Vercel)
+
+1. **Import Project** on [Vercel](https://vercel.com) from GitHub (`ALGO-TITANS/lablab-first-hackathon`).
+2. Configure settings:
+   - **Framework Preset:** `Next.js`
+   - **Root Directory:** `frontend`
+3. Configure Build Environment Variable:
+   | Key | Value | Security Note |
+   |-----|-------|---------------|
+   | `NEXT_PUBLIC_API_URL` | `https://your-backend-app.onrender.com` | Publicly exposed to client browsers |
+
+> [!WARNING]
+> **Client-Side Environment Security Notice:**
+> In Next.js, all environment variables prefixed with `NEXT_PUBLIC_` are inlined directly into browser JavaScript bundles at build time. They are completely visible in browser DevTools and network requests. **Never put API secrets, database passwords, or private LLM keys in `NEXT_PUBLIC_*` variables.** All LLM keys and database operations remain strictly on the backend.
+
+---
+
+## 🔒 Security Audit & Sandbox Boundary Analysis
+
+Safe CSV Analyst applies a rigorous defense-in-depth model:
+1. **AST Static Code Analysis:** Rejects prohibited modules (`os`, `sys`, `subprocess`, `socket`, `builtins`, `pickle`, `ctypes`, etc.) and dangerous calls (`eval`, `exec`, `open`, `globals`, `__subclasses__`).
+2. **Subprocess Isolation:** Executes in a detached worker process with an emptied environment dictionary so credentials (`GEMINI_API_KEY`, `OPENAI_API_KEY`) cannot be read.
+3. **Execution Limits:** Hard wall-clock timeouts (8.0s) and memory caps prevent infinite loops and runaway tasks.
+
+### ⚠️ Multi-Tenant Boundary Disclaimer
+> [!CAUTION]
+> **Subprocess & AST Isolation is NOT a Multi-Tenant Security Boundary.**
+> While the AST validator and subprocess isolation protect against accidental malicious code and credential exposure in development, single-tenant, or controlled hackathon environments, Python AST analysis cannot guarantee containment against kernel zero-days, resource exhaustion (CPU starvation, thread exhaustion), or OS-level side channels when running on a shared host.
+>
+> **Production Multi-Tenant Recommendation:**
+> For hosting untrusted public multi-tenant user code at scale, execution should be delegated to hardware-isolated ephemeral environments:
+> - **MicroVM Sandboxes:** AWS Firecracker (via Fly.io Machines, Modal, or Cloudflare Workflows)
+> - **Dedicated Sandboxing Services:** E2B, Daytona, or Modal Python sandboxes
+> - **Container Sandboxes:** gVisor (`runsc`) with read-only root filesystems, unprivileged user namespaces, and strict cgroups v2 memory/pids throttling.
+
+---
+
 ## 🎬 Hackathon Live Demo
 
 *Follow our comprehensive [DEMO_GUIDE.md](./DEMO_GUIDE.md) to experience the live self-healing recovery workflow and pre-loaded sample datasets.*
 
 ---
 
-## 🧪 Automated Test Suite (19 / 19 Passing)
+## 🧪 Automated Test Suite (33 / 33 Passing)
 
-The project includes thorough automated test coverage:
-- `test_code_validator.py`: Blocks dangerous modules, forbidden calls, dunder exploitation, and syntax errors.
+The project includes complete automated test coverage:
+- `test_code_validator.py`: Blocks dangerous modules, forbidden calls, dunder exploitation, arbitrary file reads/writes, and syntax errors.
 - `test_csv_service.py`: Tests CSV loading, delimiter detection, metadata extraction, and column statistics.
 - `test_execution_sandbox.py`: Tests clean execution, KeyError capture, security policy blocks, and execution timeouts.
 - `test_self_healing.py`: End-to-end self-healing recovery workflow test verifying failure detection, AI diagnosis, code repair, and recovery.
-- `test_api.py`: Tests health checks, dataset uploading, sample loading, and settings management.
+- `test_api.py`: Tests health checks, dataset uploading, sample loading, settings management, **CORS allow/deny policies, wildcard rejection, production DEBUG toggling, and configurable storage paths**.
 
 Run tests anytime with:
 ```bash
