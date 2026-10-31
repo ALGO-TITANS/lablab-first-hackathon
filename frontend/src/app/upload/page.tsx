@@ -22,12 +22,17 @@ export default function UploadPage() {
       {/* Main Upload Box */}
       <CsvUploader />
 
-      {/* Security Banner */}
+      {/* Security & Storage Banner */}
       <div className="rounded-xl border border-slate-800 bg-[#0a1128]/40 p-4 text-xs text-slate-400 flex items-start gap-3">
         <ShieldCheck className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
-        <p className="leading-relaxed">
-          <strong className="text-slate-200">Security Guarantee:</strong> All uploaded files undergo automated sanitization. Files are stored with cryptographically generated identifiers. Code execution runs inside an isolated execution subprocess with non-root access and zero access to server environment variables or API keys.
-        </p>
+        <div className="space-y-1 leading-relaxed">
+          <p>
+            <strong className="text-slate-200">Security Guarantee:</strong> All uploaded files undergo automated sanitization. Files are stored with cryptographically generated identifiers. Host environment variables and server secrets are never accessible to data processing routines.
+          </p>
+          <p className="text-slate-500 text-[11px]">
+            <strong className="text-slate-400">Public Demo & Storage Notice:</strong> Uploaded datasets and analysis histories on this public portfolio instance reside in temporary ephemeral storage that resets when the service restarts. Arbitrary code execution is disabled on public instances to ensure hosting security; pre-loaded sample datasets showcase full analytics and self-healing.
+          </p>
+        </div>
       </div>
     </div>
   );

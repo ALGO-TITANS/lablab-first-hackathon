@@ -104,6 +104,12 @@ When an execution fails (e.g., casing mismatch, type error, date parsing error):
 3. **Execution Guardrails:**
    - Hard timeout enforcement (`SANDBOX_TIMEOUT_SECONDS = 8.0s`) halts CPU runaway loops.
    - Output truncation limits memory consumption from excessive printing (`SANDBOX_MAX_OUTPUT_CHARS = 200000`).
+4. **Public Portfolio Demo Mode & Execution Guard:**
+   - In production, `ENABLE_ARBITRARY_EXECUTION` defaults to `False` and `DEMO_MODE` defaults to `True`.
+   - Arbitrary subprocess code execution on the host machine is completely blocked for custom CSV uploads.
+   - Pre-loaded sample datasets (Global Sales and Customer Churn) run controlled demonstrations with accurate data aggregations.
+   - Simulated self-healing workflows demonstrate runtime error detection, LLM diagnosis, code repair, and recovery timelines without running untrusted host subprocesses.
+   - Full live subprocess code execution remains active in local development (`ENVIRONMENT="development"`).
 
 ### Multi-Tenant Production Security Assessment:
 > **Important Security Finding:**

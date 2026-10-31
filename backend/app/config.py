@@ -35,6 +35,20 @@ class Settings(BaseSettings):
     SANDBOX_MAX_OUTPUT_CHARS: int = 200000
     MAX_REPAIR_ATTEMPTS: int = 2
 
+    # Public Demo Mode & Execution Constraints
+    # Relationship between ENABLE_ARBITRARY_EXECUTION and DEMO_MODE:
+    # 1. In production (ENVIRONMENT="production"), the system unconditionally forces:
+    #    - DEBUG = False
+    #    - ENABLE_ARBITRARY_EXECUTION = False
+    #    - DEMO_MODE = True
+    #    Explicit environment variables cannot override these production security values.
+    # 2. In development (ENVIRONMENT="development"), defaults are:
+    #    - DEBUG = True
+    #    - ENABLE_ARBITRARY_EXECUTION = True
+    #    - DEMO_MODE = False
+    ENABLE_ARBITRARY_EXECUTION: bool = True
+    DEMO_MODE: bool = False
+
     # AI Provider Configuration
     DEFAULT_LLM_PROVIDER: str = "mock"  # "mock", "gemini", "openai"
     GEMINI_API_KEY: str = ""
@@ -55,11 +69,12 @@ class Settings(BaseSettings):
         if self.DB_PATH is None:
             self.DB_PATH = self.DATA_DIR / "metadata.db"
 
-        # Production safety defaults: disable DEBUG unless explicitly forced
+        # Production security enforcement: unconditionally lock down execution, debug, and demo mode
         is_prod = self.ENVIRONMENT.lower() == "production"
         if is_prod:
-            if "DEBUG" not in os.environ:
-                self.DEBUG = False
+            self.DEBUG = False
+            self.ENABLE_ARBITRARY_EXECUTION = False
+            self.DEMO_MODE = True
 
         # Resolve CORS origins
         raw = self.CORS_ORIGINS

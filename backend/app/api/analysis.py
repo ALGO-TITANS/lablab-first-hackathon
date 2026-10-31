@@ -1,6 +1,7 @@
 import json
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
+from app.config import settings
 from app.db.database import get_db_connection
 from app.schemas.analysis import (
     AnalysisQueryRequest, AnalysisResult, AnalysisHistoryItem,
@@ -18,7 +19,8 @@ async def run_query(request: AnalysisQueryRequest):
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis orchestrator error: {str(e)}")
+        detail = f"Analysis orchestrator error: {str(e)}" if settings.DEBUG else "An error occurred while processing the analysis request."
+        raise HTTPException(status_code=500, detail=detail)
 
 @router.get("/history", response_model=List[AnalysisHistoryItem])
 def get_analysis_history(dataset_id: Optional[str] = Query(None)):

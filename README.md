@@ -5,7 +5,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Next.js](https://img.shields.io/badge/Next.js-15+-black?logo=next.js&logoColor=white)](https://nextjs.org)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/Pytest-33%2F33%20Passing-brightgreen?logo=pytest)](https://pytest.org)
+[![Tests](https://img.shields.io/badge/Pytest-38%2F38%20Passing-brightgreen?logo=pytest)](https://pytest.org)
 [![Security](https://img.shields.io/badge/Sandbox-AST%20Validated-blue)](#security--sandbox-model)
 
 ---
@@ -104,8 +104,10 @@ Safe CSV Analyst is architected for seamless separation between static frontend 
 3. Configure Environment Variables in Render:
    | Key | Recommended Value | Note |
    |-----|-------------------|------|
-   | `ENVIRONMENT` | `production` | Automatically disables debug endpoints |
-   | `DEBUG` | `False` | Disables debug mode |
+   | `ENVIRONMENT` | `production` | Automatically disables debug and arbitrary host code execution |
+   | `DEBUG` | `False` | Disables verbose debug stack traces in API errors |
+   | `ENABLE_ARBITRARY_EXECUTION` | `False` | Blocks arbitrary Python subprocess execution on public instances |
+   | `DEMO_MODE` | `True` | Activates safe sample-data demo mode |
    | `CORS_ORIGINS` | `https://your-frontend.vercel.app` | Comma-separated list of allowed origins (no `*`) |
    | `DEFAULT_LLM_PROVIDER` | `mock` (or `gemini` / `openai`) | Set API keys if using `gemini` or `openai` |
    | `GEMINI_API_KEY` | *(optional)* | Your Google Gemini API Key |
@@ -164,14 +166,14 @@ Safe CSV Analyst applies a rigorous defense-in-depth model:
 
 ---
 
-## 🧪 Automated Test Suite (33 / 33 Passing)
+## 🧪 Automated Test Suite (38 / 38 Passing)
 
 The project includes complete automated test coverage:
 - `test_code_validator.py`: Blocks dangerous modules, forbidden calls, dunder exploitation, arbitrary file reads/writes, and syntax errors.
 - `test_csv_service.py`: Tests CSV loading, delimiter detection, metadata extraction, and column statistics.
 - `test_execution_sandbox.py`: Tests clean execution, KeyError capture, security policy blocks, and execution timeouts.
 - `test_self_healing.py`: End-to-end self-healing recovery workflow test verifying failure detection, AI diagnosis, code repair, and recovery.
-- `test_api.py`: Tests health checks, dataset uploading, sample loading, settings management, **CORS allow/deny policies, wildcard rejection, production DEBUG toggling, and configurable storage paths**.
+- `test_api.py`: Tests health checks, dataset uploading, sample loading, settings management, **CORS allow/deny policies, wildcard rejection, production DEBUG toggling, configurable storage paths, public demo execution blocking on custom CSVs, sample dataset execution, simulated self-healing demonstrations, and sandbox hard kill-switches**.
 
 Run tests anytime with:
 ```bash

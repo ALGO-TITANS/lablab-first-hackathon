@@ -57,8 +57,8 @@ async def upload_csv(file: UploadFile = File(...)):
         cursor.execute("""
         INSERT INTO datasets (
             id, name, original_filename, file_path, file_size_bytes,
-            row_count, column_count, columns_json, summary_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            row_count, column_count, columns_json, summary_json, is_sample, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             analysis.id,
             analysis.name,
@@ -69,6 +69,7 @@ async def upload_csv(file: UploadFile = File(...)):
             analysis.column_count,
             json.dumps([c.model_dump() for c in analysis.columns]),
             json.dumps(analysis.summary.model_dump()),
+            0,
             analysis.created_at
         ))
         conn.commit()
@@ -127,7 +128,8 @@ def get_dataset_preview(dataset_id: str, limit: int = 50):
                 rows=df_cleaned.to_dict(orient="records")
             )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to read dataset preview: {str(e)}")
+            detail = f"Failed to read dataset preview: {str(e)}" if settings.DEBUG else "Failed to read dataset preview."
+            raise HTTPException(status_code=500, detail=detail)
 
 @router.delete("/{dataset_id}")
 def delete_dataset(dataset_id: str):
@@ -160,8 +162,15 @@ async def load_sample_dataset(sample_name: str):
     if sample_name not in filename_map:
         raise HTTPException(status_code=400, detail=f"Unknown sample dataset. Choose from: {list(filename_map.keys())}")
 
-    src_file = settings.SAMPLE_DATA_DIR / filename_map[sample_name]
-    if not src_file.exists():
+    sample_root = settings.SAMPLE_DATA_DIR.resolve()
+    src_file = (settings.SAMPLE_DATA_DIR / filename_map[sample_name]).resolve()
+    # Path traversal security validation: ensure resolved path is strictly inside SAMPLE_DATA_DIR
+    try:
+        src_file.relative_to(sample_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid sample file path.")
+
+    if not src_file.is_file():
         raise HTTPException(status_code=404, detail="Sample dataset file not found on disk.")
 
     file_bytes = src_file.read_bytes()
@@ -169,7 +178,13 @@ async def load_sample_dataset(sample_name: str):
 
     dataset_id = str(uuid.uuid4())
     safe_filename = f"{dataset_id}_{src_file.name}"
-    dest_path = settings.UPLOADS_DIR / safe_filename
+    dest_root = settings.UPLOADS_DIR.resolve()
+    dest_path = (settings.UPLOADS_DIR / safe_filename).resolve()
+    try:
+        dest_path.relative_to(dest_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid destination file path.")
+
     dest_path.write_bytes(file_bytes)
 
     analysis = CSVService.analyze_dataset(
@@ -185,8 +200,8 @@ async def load_sample_dataset(sample_name: str):
         cursor.execute("""
         INSERT INTO datasets (
             id, name, original_filename, file_path, file_size_bytes,
-            row_count, column_count, columns_json, summary_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            row_count, column_count, columns_json, summary_json, is_sample, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             analysis.id,
             analysis.name,
@@ -197,6 +212,7 @@ async def load_sample_dataset(sample_name: str):
             analysis.column_count,
             json.dumps([c.model_dump() for c in analysis.columns]),
             json.dumps(analysis.summary.model_dump()),
+            1,
             analysis.created_at
         ))
         conn.commit()

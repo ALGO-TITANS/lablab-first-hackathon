@@ -22,9 +22,16 @@ def init_db():
             column_count INTEGER NOT NULL,
             columns_json TEXT NOT NULL,
             summary_json TEXT NOT NULL,
+            is_sample INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         )
         """)
+
+        # Add is_sample column if existing database lacks it
+        cursor.execute("PRAGMA table_info(datasets)")
+        existing_cols = [r[1] for r in cursor.fetchall()]
+        if "is_sample" not in existing_cols:
+            cursor.execute("ALTER TABLE datasets ADD COLUMN is_sample INTEGER NOT NULL DEFAULT 0")
 
         # Analyses Table
         cursor.execute("""

@@ -21,6 +21,24 @@ class ExecutionSandbox:
         """
         start_time = time.time()
 
+        # Step 0: Production Demo Mode Guard
+        if not settings.ENABLE_ARBITRARY_EXECUTION:
+            duration = (time.time() - start_time) * 1000
+            return {
+                "success": False,
+                "error_type": "ArbitraryExecutionDisabled",
+                "error_message": (
+                    "Arbitrary Python code execution is disabled on this public instance for security. "
+                    "Run locally with ENABLE_ARBITRARY_EXECUTION=true for unrestricted execution."
+                ),
+                "error_traceback": "PolicyEnforcement: Host code execution is restricted in public demo mode.",
+                "duration_ms": duration,
+                "data": None,
+                "summary": None,
+                "chart_type": None,
+                "chart_data": None
+            }
+
         # Step 1: AST Security Validation
         is_safe, reason = CodeValidator.validate_python_code(code)
         if not is_safe:

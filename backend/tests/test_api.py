@@ -133,3 +133,249 @@ def test_settings_configurable_storage(tmp_path):
     assert custom_settings.DATA_DIR.exists()
     assert custom_settings.UPLOADS_DIR.exists()
     assert custom_settings.DB_PATH.parent.exists()
+
+def test_settings_execution_defaults_in_production_and_dev(monkeypatch):
+    from app.config import Settings
+    monkeypatch.delenv("DEBUG", raising=False)
+    monkeypatch.delenv("ENABLE_ARBITRARY_EXECUTION", raising=False)
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+
+    dev_settings = Settings(ENVIRONMENT="development")
+    assert dev_settings.ENABLE_ARBITRARY_EXECUTION is True
+    assert dev_settings.DEMO_MODE is False
+    assert dev_settings.DEBUG is True
+    prod_settings = Settings(ENVIRONMENT="production")
+    assert prod_settings.ENABLE_ARBITRARY_EXECUTION is False
+    assert prod_settings.DEMO_MODE is True
+    assert prod_settings.DEBUG is False
+
+def test_public_demo_blocks_arbitrary_execution_on_custom_upload():
+    from app.config import settings
+    # 1. Upload custom CSV file
+    csv_content = b"user_id,action,score\n1,click,10\n2,view,5\n3,buy,20"
+    upload_res = client.post(
+        "/api/datasets/upload",
+        files={"file": ("custom_user_dataset.csv", csv_content, "text/csv")}
+    )
+    assert upload_res.status_code == 200
+    dataset_id = upload_res.json()["id"]
+
+    # 2. Simulate public demo mode (arbitrary execution disabled)
+    original_setting = settings.ENABLE_ARBITRARY_EXECUTION
+    try:
+        settings.ENABLE_ARBITRARY_EXECUTION = False
+        query_res = client.post(
+            "/api/analysis/query",
+            json={"dataset_id": dataset_id, "query": "What is the highest score?"}
+        )
+        assert query_res.status_code == 400
+        assert "Arbitrary Python code execution is disabled" in query_res.json()["detail"]
+    finally:
+        settings.ENABLE_ARBITRARY_EXECUTION = original_setting
+def test_public_demo_allows_sample_dataset_query():
+    from app.config import settings
+    # 1. Load pre-loaded sample dataset
+    sample_res = client.post("/api/datasets/load-sample/sales")
+    assert sample_res.status_code == 200
+    dataset_id = sample_res.json()["id"]
+
+    # 2. In public demo mode, query on sample dataset should succeed safely
+    original_setting = settings.ENABLE_ARBITRARY_EXECUTION
+    try:
+        settings.ENABLE_ARBITRARY_EXECUTION = False
+        query_res = client.post(
+            "/api/analysis/query",
+            json={"dataset_id": dataset_id, "query": "Top 5 products by revenue"}
+        )
+        assert query_res.status_code == 200
+        data = query_res.json()
+        assert data["status"] == "success"
+        assert data["repair_attempts_count"] == 0
+        assert len(data["chart_data"]) > 0
+        assert len(data["result_table"]) > 0
+    finally:
+        settings.ENABLE_ARBITRARY_EXECUTION = original_setting
+def test_public_demo_simulated_self_healing():
+    from app.config import settings
+    sample_res = client.post("/api/datasets/load-sample/sales")
+    assert sample_res.status_code == 200
+    dataset_id = sample_res.json()["id"]
+
+    original_setting = settings.ENABLE_ARBITRARY_EXECUTION
+    try:
+        settings.ENABLE_ARBITRARY_EXECUTION = False
+        query_res = client.post(
+            "/api/analysis/query",
+            json={
+                "dataset_id": dataset_id,
+                "query": "Show revenue by region",
+                "demo_force_error": True
+            }
+        )
+        assert query_res.status_code == 200
+        data = query_res.json()
+        assert data["status"] == "repaired"
+        assert data["repair_attempts_count"] == 1
+        assert len(data["attempts"]) == 2
+        assert data["attempts"][0]["success"] is False
+        assert data["attempts"][0]["error_type"] == "KeyError"
+        assert data["attempts"][1]["success"] is True
+        assert len(data["chart_data"]) > 0
+    finally:
+        settings.ENABLE_ARBITRARY_EXECUTION = original_setting
+def test_execution_sandbox_hard_kill_switch():
+    from app.config import settings
+    from app.services.execution_sandbox import ExecutionSandbox
+    original_setting = settings.ENABLE_ARBITRARY_EXECUTION
+    try:
+        settings.ENABLE_ARBITRARY_EXECUTION = False
+        res = ExecutionSandbox.execute("import math; print(math.pi)", "nonexistent.csv")
+        assert res["success"] is False
+        assert res["error_type"] == "ArbitraryExecutionDisabled"
+    finally:
+        settings.ENABLE_ARBITRARY_EXECUTION = original_setting
+
+def test_custom_upload_spoofed_filename_is_not_sample():
+    from app.config import settings
+    from app.db.database import get_db_connection
+    # Attacker names upload with trusted sample filename
+    spoofed_csv = b"col1,col2\na,1\nb,2"
+    res = client.post(
+        "/api/datasets/upload",
+        files={"file": ("global_sales_transactions.csv", spoofed_csv, "text/csv")}
+    )
+    assert res.status_code == 200
+    dataset_id = res.json()["id"]
+
+    # Verify is_sample is strictly 0 in database
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_sample, original_filename FROM datasets WHERE id = ?", (dataset_id,))
+        row = cursor.fetchone()
+        assert row["is_sample"] == 0
+        assert row["original_filename"] == "global_sales_transactions.csv"
+
+    # Verify that in demo mode, spoofed filename does NOT bypass arbitrary execution block
+    original_setting = settings.ENABLE_ARBITRARY_EXECUTION
+    try:
+        settings.ENABLE_ARBITRARY_EXECUTION = False
+        query_res = client.post(
+            "/api/analysis/query",
+            json={"dataset_id": dataset_id, "query": "Top revenue"}
+        )
+        assert query_res.status_code == 400
+        assert "Arbitrary Python code execution is disabled" in query_res.json()["detail"]
+    finally:
+        settings.ENABLE_ARBITRARY_EXECUTION = original_setting
+
+def test_request_data_cannot_set_is_sample():
+    from app.db.database import get_db_connection
+    # Try injecting is_sample in form data
+    res = client.post(
+        "/api/datasets/upload",
+        data={"is_sample": "1"},
+        files={"file": ("test.csv", b"a,b\n1,2", "text/csv")}
+    )
+    assert res.status_code == 200
+    dataset_id = res.json()["id"]
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_sample FROM datasets WHERE id = ?", (dataset_id,))
+        row = cursor.fetchone()
+        assert row["is_sample"] == 0
+
+def test_sample_path_traversal_rejected():
+    res = client.post("/api/datasets/load-sample/..%2F..%2Fetc%2Fpasswd")
+    assert res.status_code in [400, 404]
+    res_direct = client.post("/api/datasets/load-sample/../../etc/passwd")
+    assert res_direct.status_code in [400, 404]
+    res2 = client.post("/api/datasets/load-sample/unknown_dataset")
+    assert res2.status_code == 400
+
+def test_missing_columns_no_fabricated_fallback(tmp_path):
+    from app.config import settings
+    from app.db.database import get_db_connection, get_utc_now_iso
+    # Create sample-flagged dataset pointing to CSV with missing expected columns
+    dummy_csv = settings.UPLOADS_DIR / "dummy_sample_missing_cols.csv"
+    dummy_csv.write_text("unrelated_col1,unrelated_col2\n10,20\n30,40")
+    dummy_id = "test-missing-cols-sample"
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+        INSERT OR REPLACE INTO datasets (
+            id, name, original_filename, file_path, file_size_bytes,
+            row_count, column_count, columns_json, summary_json, is_sample, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            dummy_id, "Missing Cols Sample", "dummy.csv", str(dummy_csv),
+            len(dummy_csv.read_bytes()), 2, 2, "[]", "{}", 1, get_utc_now_iso()
+        ))
+        conn.commit()
+
+    original_setting = settings.ENABLE_ARBITRARY_EXECUTION
+    try:
+        settings.ENABLE_ARBITRARY_EXECUTION = False
+        query_res = client.post(
+            "/api/analysis/query",
+            json={"dataset_id": dummy_id, "query": "Show revenue by region", "demo_force_error": True}
+        )
+        # Must return controlled error, NEVER fabricated fallback data
+        assert query_res.status_code == 400
+        assert "schema validation failed" in query_res.json()["detail"].lower()
+    finally:
+        settings.ENABLE_ARBITRARY_EXECUTION = original_setting
+        if dummy_csv.exists():
+            dummy_csv.unlink()
+
+def test_simulated_self_healing_explicitly_identified_as_simulation():
+    from app.config import settings
+    sample_res = client.post("/api/datasets/load-sample/sales")
+    dataset_id = sample_res.json()["id"]
+
+    original_setting = settings.ENABLE_ARBITRARY_EXECUTION
+    try:
+        settings.ENABLE_ARBITRARY_EXECUTION = False
+        res = client.post(
+            "/api/analysis/query",
+            json={"dataset_id": dataset_id, "query": "Revenue by region", "demo_force_error": True}
+        )
+        assert res.status_code == 200
+        data = res.json()
+        step_names = [s["step"] for s in data["timeline"]]
+        assert "Simulating execution" in step_names
+        assert "Demonstrating error diagnosis" in step_names
+        assert "Applying predefined repair" in step_names
+
+        # Verify simulation notification in message
+        sim_step = next(s for s in data["timeline"] if s["step"] == "Simulating execution")
+        assert "Demonstration: Subprocess execution is disabled" in sim_step["message"]
+    finally:
+        settings.ENABLE_ARBITRARY_EXECUTION = original_setting
+
+def test_production_environment_overrides_explicit_security_env_vars(monkeypatch):
+    from app.config import Settings
+    # Even if environment variables explicitly attempt to enable execution and debug,
+    # production mode must unconditionally force safe values
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("ENABLE_ARBITRARY_EXECUTION", "true")
+    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setenv("DEBUG", "true")
+
+    settings_obj = Settings()
+    assert settings_obj.ENABLE_ARBITRARY_EXECUTION is False
+    assert settings_obj.DEMO_MODE is True
+    assert settings_obj.DEBUG is False
+
+def test_development_execution_behavior_remains_unchanged(monkeypatch):
+    from app.config import Settings
+    monkeypatch.delenv("DEBUG", raising=False)
+    monkeypatch.delenv("ENABLE_ARBITRARY_EXECUTION", raising=False)
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+
+    dev_settings = Settings()
+    assert dev_settings.ENABLE_ARBITRARY_EXECUTION is True
+    assert dev_settings.DEMO_MODE is False
+    assert dev_settings.DEBUG is True

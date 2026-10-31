@@ -45,6 +45,8 @@ def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
         "debug": settings.DEBUG,
+        "demo_mode": settings.DEMO_MODE,
+        "arbitrary_execution_enabled": settings.ENABLE_ARBITRARY_EXECUTION,
         "default_provider": settings.DEFAULT_LLM_PROVIDER,
         "sandbox_timeout_seconds": settings.SANDBOX_TIMEOUT_SECONDS
     }

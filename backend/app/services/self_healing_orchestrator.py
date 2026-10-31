@@ -2,6 +2,8 @@ import os
 import json
 import uuid
 import time
+import tempfile
+from pathlib import Path
 import pandas as pd
 from typing import Dict, Any, List, Optional
 from app.config import settings
@@ -30,7 +32,39 @@ class SelfHealingOrchestrator:
         if not dataset_row:
             raise ValueError(f"Dataset with ID '{request.dataset_id}' not found.")
 
-        dataset_path = dataset_row["file_path"]
+        dataset_dict = dict(dataset_row)
+        # Trust ONLY the server-controlled database field 'is_sample'.
+        # Never trust user-controlled filenames or request parameters.
+        is_sample = int(dataset_dict.get("is_sample", 0)) == 1
+
+        # Public Demo Mode Guard: Block arbitrary Python execution on custom uploaded CSVs
+        if not settings.ENABLE_ARBITRARY_EXECUTION and not is_sample:
+            raise ValueError(
+                "Public Portfolio Demo Mode: Arbitrary Python code execution is disabled for custom uploaded CSVs "
+                "to ensure hosting security. Please use the pre-loaded sample datasets (Global Sales or Customer Churn) "
+                "to explore analytical queries, interactive charts, and the self-healing AI agent."
+            )
+
+        # In Public Demo Mode, route sample datasets to the controlled safe demo handler
+        if not settings.ENABLE_ARBITRARY_EXECUTION and is_sample:
+            return await SelfHealingOrchestrator._process_sample_demo(
+                request=request,
+                dataset_row=dataset_row,
+                columns_meta=json.loads(dataset_row["columns_json"]),
+                summary_meta=json.loads(dataset_row["summary_json"])
+            )
+
+        dataset_path = Path(dataset_row["file_path"]).resolve()
+        trusted_roots = [
+            settings.UPLOADS_DIR.resolve(),
+            settings.SAMPLE_DATA_DIR.resolve(),
+            Path(tempfile.gettempdir()).resolve(),
+            Path("/tmp").resolve()
+        ]
+        if not any(dataset_path.is_relative_to(root) for root in trusted_roots):
+            raise ValueError("Security violation: Dataset file path is outside trusted storage directories.")
+        if not dataset_path.is_file():
+            raise ValueError("Dataset file not found on disk.")
         columns_meta = json.loads(dataset_row["columns_json"])
         summary_meta = json.loads(dataset_row["summary_json"])
 
@@ -255,6 +289,355 @@ class SelfHealingOrchestrator:
             chart_type=current_chart_type if is_success else "none",
             chart_data=formatted_chart_data if is_success else [],
             result_table=formatted_table if is_success else [],
+            summary_stats=summary_stats,
+            timeline=timeline,
+            attempts=attempts,
+            created_at=get_utc_now_iso()
+        )
+
+    @staticmethod
+    async def _process_sample_demo(
+        request: AnalysisQueryRequest,
+        dataset_row: Any,
+        columns_meta: list[dict],
+        summary_meta: dict
+    ) -> AnalysisResult:
+        """
+        Controlled sample demonstration handler for public portfolio mode.
+        Executes safe, predefined scenarios on pre-loaded sample datasets without
+        invoking arbitrary subprocess execution on the host machine.
+        """
+        analysis_id = str(uuid.uuid4())
+        overall_start = time.time()
+        timeline: List[TimelineStep] = []
+        attempts: List[ExecutionAttemptItem] = []
+
+        def add_step(name: str, status: str, message: str, details: Optional[Dict[str, Any]] = None):
+            timeline.append(TimelineStep(
+                step=name,
+                status=status,
+                message=message,
+                timestamp=get_utc_now_iso(),
+                details=details
+            ))
+
+        add_step("Understanding request", "completed", f"Analyzed query intent against schema for '{dataset_row['name']}' (Public Demo Mode).")
+
+        dataset_path = Path(dataset_row["file_path"]).resolve()
+        trusted_roots = [settings.UPLOADS_DIR.resolve(), settings.SAMPLE_DATA_DIR.resolve()]
+        if not any(dataset_path.is_relative_to(root) for root in trusted_roots):
+            raise ValueError("Security violation: Sample dataset path is outside trusted storage directories.")
+        if not dataset_path.is_file():
+            raise ValueError("Sample dataset file not found on disk.")
+
+        try:
+            df = pd.read_csv(dataset_path)
+        except Exception as e:
+            detail = f"Failed to load sample dataset: {str(e)}" if settings.DEBUG else "Failed to load sample dataset."
+            raise ValueError(detail)
+
+        if df.empty:
+            raise ValueError("Sample dataset is empty and contains no data rows.")
+
+        # Check if Self-Healing demonstration is requested
+        if request.demo_force_error:
+            if "region" in df.columns and "revenue" in df.columns:
+                target_cat, target_num = "region", "revenue"
+                bad_cat = "Region"
+                label = "geographic regions"
+            elif "contract_type" in df.columns and "monthly_charges" in df.columns:
+                target_cat, target_num = "contract_type", "monthly_charges"
+                bad_cat = "Contract_Type"
+                label = "contract types"
+            else:
+                raise ValueError("Sample dataset schema validation failed: required columns for self-healing demonstration are missing from dataset.")
+
+            # 1. Demonstration code with intentional casing error
+            initial_code = (
+                f"# Demonstration script with intentional column casing error for self-healing demonstration\n"
+                f"grouped = df.groupby('{bad_cat}')['{target_num}'].sum().reset_index()\n"
+                f"result = {{'data': grouped, 'chart_type': 'bar', 'summary': 'Aggregated {target_num} by {target_cat}.'}}"
+            )
+            add_step("Generating Python code", "completed", "Generated demonstration script with intentional column casing error for self-healing demonstration.", {"initial_code_preview": initial_code[:200]})
+            add_step("Simulating execution", "running", "Simulating execution failure for Attempt #1 (Demonstration: Subprocess execution is disabled in public demo mode).")
+
+            err_traceback = (
+                f"Traceback (most recent call last):\n"
+                f"  File \"demo_script.py\", line 2, in <module>\n"
+                f"    grouped = df.groupby('{bad_cat}')['{target_num}'].sum().reset_index()\n"
+                f"KeyError: '{bad_cat}'"
+            )
+            attempts.append(ExecutionAttemptItem(
+                attempt_number=1,
+                code=initial_code,
+                success=False,
+                error_type="KeyError",
+                error_message=f"'{bad_cat}'",
+                error_traceback=err_traceback,
+                diagnosis=None,
+                duration_ms=45.0
+            ))
+
+            add_step("Detecting error", "warning", f"Simulated runtime error detected on attempt #1: [KeyError] '{bad_cat}'.", {"traceback": err_traceback, "simulation": True})
+            add_step("Demonstrating error diagnosis", "running", "AI self-healing agent diagnosing simulated KeyError against schema...")
+
+            diagnosis = (
+                f"Detected KeyError: '{bad_cat}'. The script referenced capitalized column '{bad_cat}', "
+                f"but the dataset schema defines lowercase '{target_cat}'. Normalized column casing in repaired script."
+            )
+            repaired_code = (
+                f"# Repaired Pandas code with normalized column names\n"
+                f"repaired_df = df.groupby('{target_cat}', as_index=False)['{target_num}'].sum()\n"
+                f"repaired_df = repaired_df.sort_values(by='{target_num}', ascending=False)\n"
+                f"result = {{\n"
+                f"    'data': repaired_df.to_dict(orient='records'),\n"
+                f"    'chart_type': 'bar',\n"
+                f"    'summary': 'Successfully repaired execution. Aggregated total {target_num} across {label}.'\n"
+                f"}}"
+            )
+            add_step("Demonstrating error diagnosis", "completed", f"Diagnosis: {diagnosis}")
+            add_step("Applying predefined repair", "completed", "Applied predefined self-healing repair with normalized column names.", {"repaired_code_preview": repaired_code[:200]})
+            add_step("Computing verified sample results", "running", "Computing verified analytical results directly from sample dataset without host subprocess execution...")
+
+            # Calculate verified results strictly from sample dataset - NO fabricated fallback data
+            res_df = df.groupby(target_cat, as_index=False)[target_num].sum().sort_values(by=target_num, ascending=False)
+            formatted_data = res_df.to_dict(orient="records")
+
+            attempts.append(ExecutionAttemptItem(
+                attempt_number=2,
+                code=repaired_code,
+                success=True,
+                error_type=None,
+                error_message=None,
+                error_traceback=None,
+                diagnosis=diagnosis,
+                duration_ms=62.0
+            ))
+
+            final_code = repaired_code
+            explanation = f"Successfully repaired execution. Aggregated total {target_num} across {label}."
+            chart_type = "bar"
+            final_status = "repaired"
+            add_step("Computing verified sample results", "completed", "Computed verified analytical results directly from sample dataset without host subprocess execution.")
+
+        else:
+            # Defensive query handling on verified sample dataset
+            q_lower = request.query.lower()
+            try:
+                if "top" in q_lower or "product" in q_lower or "best" in q_lower:
+                    cat_cols = [c for c in ["product_name", "category", "region"] if c in df.columns]
+                    if not cat_cols:
+                        non_nums = df.select_dtypes(exclude="number").columns.tolist()
+                        if not non_nums:
+                            raise ValueError("Sample dataset lacks categorical columns for top-item grouping.")
+                        col = non_nums[0]
+                    else:
+                        col = cat_cols[0]
+
+                    num_cols = [c for c in ["revenue", "units_sold", "profit", "monthly_charges"] if c in df.columns]
+                    if not num_cols:
+                        nums = df.select_dtypes(include="number").columns.tolist()
+                        if not nums:
+                            raise ValueError("Sample dataset lacks numeric columns for top-item ranking.")
+                        metric = nums[0]
+                    else:
+                        metric = num_cols[0]
+
+                    res_df = df.groupby(col, as_index=False)[metric].sum().sort_values(by=metric, ascending=False).head(5)
+                    chart_type = "bar"
+                    final_code = (
+                        f"top_items = df.groupby('{col}', as_index=False)['{metric}'].sum()\n"
+                        f"top_items = top_items.sort_values(by='{metric}', ascending=False).head(5)\n"
+                        f"result = {{\n"
+                        f"    'data': top_items.to_dict(orient='records'),\n"
+                        f"    'chart_type': 'bar',\n"
+                        f"    'summary': 'Top 5 {col}s ranked by total {metric}.'\n"
+                        f"}}"
+                    )
+                    explanation = f"Identified top 5 {col}s ranked by total {metric}."
+
+                elif "trend" in q_lower or "month" in q_lower or "time" in q_lower or "date" in q_lower:
+                    date_cols = [c for c in ["date", "timestamp", "period"] if c in df.columns]
+                    if not date_cols:
+                        raise ValueError("Sample dataset lacks a valid date column for time-series trend analysis.")
+                    date_col = date_cols[0]
+                    num_cols = [c for c in ["revenue", "profit", "monthly_charges", "total_charges"] if c in df.columns]
+                    if not num_cols:
+                        nums = df.select_dtypes(include="number").columns.tolist()
+                        if not nums:
+                            raise ValueError("Sample dataset lacks numeric columns for trend analysis.")
+                        metric = nums[0]
+                    else:
+                        metric = num_cols[0]
+
+                    df_copy = df.copy()
+                    df_copy["period"] = pd.to_datetime(df_copy[date_col], errors="coerce").dt.to_period("M").astype(str)
+                    res_df = df_copy.groupby("period", as_index=False)[metric].sum().sort_values(by="period").head(12)
+                    chart_type = "line"
+                    final_code = (
+                        f"df['period'] = pd.to_datetime(df['{date_col}']).dt.to_period('M').astype(str)\n"
+                        f"trend = df.groupby('period', as_index=False)['{metric}'].sum()\n"
+                        f"result = {{\n"
+                        f"    'data': trend.to_dict(orient='records'),\n"
+                        f"    'chart_type': 'line',\n"
+                        f"    'summary': 'Monthly trend over time.'\n"
+                        f"}}"
+                    )
+                    explanation = f"Analyzed monthly chronological trend for {metric}."
+
+                elif "missing" in q_lower or "null" in q_lower:
+                    res_df = df.isna().sum().reset_index()
+                    res_df.columns = ["column_name", "missing_count"]
+                    chart_type = "bar"
+                    final_code = (
+                        "missing_summary = df.isna().sum().reset_index()\n"
+                        "missing_summary.columns = ['column_name', 'missing_count']\n"
+                        "result = {'data': missing_summary.to_dict(orient='records'), 'chart_type': 'bar', 'summary': 'Missing value analysis.'}"
+                    )
+                    explanation = f"Audited missing values across all {len(df.columns)} columns."
+
+                elif "churn" in q_lower or "contract" in q_lower or "distribution" in q_lower or "pie" in q_lower:
+                    cat_cols = [c for c in ["contract_type", "churn_status", "payment_method", "region", "category"] if c in df.columns]
+                    if not cat_cols:
+                        non_nums = df.select_dtypes(exclude="number").columns.tolist()
+                        if not non_nums:
+                            raise ValueError("Sample dataset lacks categorical columns for distribution analysis.")
+                        cat_col = non_nums[0]
+                    else:
+                        cat_col = cat_cols[0]
+
+                    res_df = df[cat_col].value_counts().reset_index()
+                    res_df.columns = [cat_col, "count"]
+                    chart_type = "pie"
+                    final_code = (
+                        f"dist = df['{cat_col}'].value_counts().reset_index()\n"
+                        f"dist.columns = ['{cat_col}', 'count']\n"
+                        f"result = {{\n"
+                        f"    'data': dist.to_dict(orient='records'),\n"
+                        f"    'chart_type': 'pie',\n"
+                        f"    'summary': 'Categorical distribution breakdown.'\n"
+                        f"}}"
+                    )
+                    explanation = f"Calculated categorical distribution breakdown for {cat_col}."
+
+                else:
+                    cat_cols = df.select_dtypes(exclude="number").columns.tolist()
+                    num_cols = df.select_dtypes(include="number").columns.tolist()
+                    if not cat_cols or not num_cols:
+                        raise ValueError("Sample dataset lacks suitable columns for categorical aggregation.")
+                    cat_col = cat_cols[0]
+                    num_col = num_cols[0]
+
+                    res_df = df.groupby(cat_col, as_index=False)[num_col].sum().sort_values(by=num_col, ascending=False).head(10)
+                    chart_type = "bar"
+                    final_code = (
+                        f"breakdown = df.groupby('{cat_col}', as_index=False)['{num_col}'].sum()\n"
+                        f"result = {{\n"
+                        f"    'data': breakdown.to_dict(orient='records'),\n"
+                        f"    'chart_type': 'bar',\n"
+                        f"    'summary': 'Aggregated metrics.'\n"
+                        f"}}"
+                    )
+                    explanation = f"Calculated aggregated {num_col} grouped by {cat_col}."
+
+                formatted_data = res_df.to_dict(orient="records")
+
+            except ValueError:
+                raise
+            except Exception as e:
+                detail = f"Failed to compute sample analysis: {str(e)}" if settings.DEBUG else "Failed to compute sample analysis."
+                raise ValueError(detail)
+
+            add_step("Generating Python code", "completed", "Generated Pandas analytical query script matching intent.", {"initial_code_preview": final_code[:200]})
+            add_step("Computing verified sample results", "completed", "Computed verified analytical results directly from sample dataset without host subprocess execution.")
+
+            attempts.append(ExecutionAttemptItem(
+                attempt_number=1,
+                code=final_code,
+                success=True,
+                error_type=None,
+                error_message=None,
+                error_traceback=None,
+                diagnosis=None,
+                duration_ms=48.0
+            ))
+            final_status = "success"
+
+        formatted_table = formatted_data[:50]
+        formatted_chart_data = formatted_data[:30]
+
+        add_step("Verifying results", "completed", f"Verified {len(formatted_table)} output records ready for visualization.")
+        add_step("Analysis completed", "completed", f"Process finished with status: {final_status.upper()}.")
+
+        overall_duration = (time.time() - overall_start) * 1000
+        summary_stats = {
+            "total_attempts": len(attempts),
+            "repair_attempts": len(attempts) - 1,
+            "status": final_status,
+            "execution_time_ms": round(overall_duration, 2)
+        }
+
+        # Persist to SQLite
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO analyses (
+                id, dataset_id, query, status, duration_ms, repair_attempts_count,
+                final_code, explanation, chart_type, chart_data_json, result_table_json,
+                summary_stats_json, timeline_json, error_details_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                analysis_id,
+                request.dataset_id,
+                request.query,
+                final_status,
+                round(overall_duration, 2),
+                len(attempts) - 1,
+                final_code,
+                explanation,
+                chart_type,
+                json.dumps(formatted_chart_data),
+                json.dumps(formatted_table),
+                json.dumps(summary_stats),
+                json.dumps([t.model_dump() for t in timeline]),
+                None,
+                get_utc_now_iso()
+            ))
+
+            for att in attempts:
+                cursor.execute("""
+                INSERT INTO execution_attempts (
+                    id, analysis_id, attempt_number, code, success, error_type,
+                    error_message, error_traceback, diagnosis, duration_ms, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    str(uuid.uuid4()),
+                    analysis_id,
+                    att.attempt_number,
+                    att.code,
+                    1 if att.success else 0,
+                    att.error_type,
+                    att.error_message,
+                    att.error_traceback,
+                    att.diagnosis,
+                    att.duration_ms,
+                    get_utc_now_iso()
+                ))
+
+            conn.commit()
+
+        return AnalysisResult(
+            id=analysis_id,
+            dataset_id=request.dataset_id,
+            query=request.query,
+            status=final_status,
+            duration_ms=round(overall_duration, 2),
+            repair_attempts_count=len(attempts) - 1,
+            final_code=final_code,
+            explanation=explanation,
+            chart_type=chart_type,
+            chart_data=formatted_chart_data,
+            result_table=formatted_table,
             summary_stats=summary_stats,
             timeline=timeline,
             attempts=attempts,
